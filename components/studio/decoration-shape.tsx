@@ -65,6 +65,21 @@ export function DecorationShape({ d }: { d: Decoration }) {
         />
       )
     }
+    case 'image': {
+      if (!d.src) return null
+      return (
+        <image
+          href={d.src}
+          x={d.x - d.w / 2}
+          y={d.y - d.h / 2}
+          width={d.w}
+          height={d.h}
+          transform={transform}
+          preserveAspectRatio="xMidYMid meet"
+          crossOrigin="anonymous"
+        />
+      )
+    }
     default:
       return null
   }

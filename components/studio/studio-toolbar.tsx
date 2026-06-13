@@ -1,5 +1,6 @@
 'use client'
 
+import { useRef } from 'react'
 import {
   MousePointer2,
   Circle,
@@ -12,6 +13,8 @@ import {
   Copy,
   ArrowUp,
   ArrowDown,
+  ImagePlus,
+  Loader2,
 } from 'lucide-react'
 import type { Decoration, GarmentType } from '@/lib/types'
 import { PALETTE, stylesFor, GARMENT_LABEL } from '@/lib/garments'
@@ -35,6 +38,8 @@ type Props = {
   onDeleteSelected: () => void
   onDuplicateSelected: () => void
   onReorderSelected: (dir: 'up' | 'down') => void
+  onUploadImage: (file: File) => void
+  uploading: boolean
 }
 
 const TOOLS: { id: EditorTool; label: string; icon: typeof Circle }[] = [
@@ -63,8 +68,11 @@ export function StudioToolbar({
   onDeleteSelected,
   onDuplicateSelected,
   onReorderSelected,
+  onUploadImage,
+  uploading,
 }: Props) {
   const styles = stylesFor(garment)
+  const fileRef = useRef<HTMLInputElement>(null)
   // When a shape is selected, the palette recolors it; otherwise it sets the
   // color used for the next shape you draw.
   const activeColor = selected ? selected.fill : color
@@ -117,6 +125,30 @@ export function StudioToolbar({
             </button>
           ))}
         </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) onUploadImage(file)
+            e.target.value = ''
+          }}
+        />
+        <Button
+          variant="secondary"
+          className="mt-2 w-full justify-center font-semibold"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+        >
+          {uploading ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <ImagePlus className="size-4" />
+          )}
+          {uploading ? 'Uploading…' : 'Upload image'}
+        </Button>
       </div>
 
       <div>

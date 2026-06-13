@@ -11,6 +11,7 @@ export type ShapeKind =
   | 'triangle'
   | 'star'
   | 'path'
+  | 'image'
 
 /**
  * A vector decoration placed on a garment. All geometry is normalized to the
@@ -39,6 +40,8 @@ export type Decoration = {
   strokeWidth: number
   /** for `line` and freehand `path` kinds — normalized points */
   points?: Vec2[]
+  /** for the `image` kind — the uploaded image URL (Vercel Blob) */
+  src?: string
 }
 
 export type DesignLayer = {

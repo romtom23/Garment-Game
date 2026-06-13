@@ -14,24 +14,28 @@ export function makeDecoration(
   y: number,
   fill: string,
   stroke = '#2b2b2b',
+  opts?: { src?: string; w?: number; h?: number },
 ): Decoration {
   const base: Decoration = {
     id: uid(),
     kind,
     x,
     y,
-    w: DEFAULT_SIZE,
-    h: DEFAULT_SIZE,
+    w: opts?.w ?? DEFAULT_SIZE,
+    h: opts?.h ?? DEFAULT_SIZE,
     rotation: 0,
     fill,
     stroke,
-    strokeWidth: kind === 'line' ? 0.018 : 0.006,
+    strokeWidth: kind === 'line' ? 0.018 : kind === 'image' ? 0 : 0.006,
   }
   if (kind === 'line') {
     base.points = [
       { x: x - DEFAULT_SIZE / 2, y },
       { x: x + DEFAULT_SIZE / 2, y },
     ]
+  }
+  if (kind === 'image' && opts?.src) {
+    base.src = opts.src
   }
   return base
 }
@@ -84,6 +88,7 @@ export function decorationContains(d: Decoration, px: number, py: number): boole
     case 'circle':
       return (dx / rx) ** 2 + (dy / ry) ** 2 <= 1
     case 'rect':
+    case 'image':
       return Math.abs(dx) <= rx && Math.abs(dy) <= ry
     case 'triangle': {
       // apex at top-center, base across the bottom

@@ -23,7 +23,8 @@ import { GARMENT_LABEL } from '@/lib/garments'
 import { saveDesign, publishDesign } from '@/app/actions/designs'
 import { addToCart } from '@/app/actions/cart'
 import { priceDesign, formatUSD } from '@/lib/pricing'
-import { uid } from '@/lib/decorations'
+import { uid, makeDecoration } from '@/lib/decorations'
+import { loadImageMeta } from '@/lib/image-meta'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { VectorEditor, type EditorTool } from './vector-editor'
@@ -56,6 +57,7 @@ export function StudioShell({ initialDesign }: { initialDesign: Design }) {
   const [playKey, setPlayKey] = useState(0)
   const [publishing, setPublishing] = useState(false)
   const [addingId, setAddingId] = useState<GarmentType | null>(null)
+  const [uploading, setUploading] = useState(false)
 
   const activeLayer = useMemo(
     () => design.layers.find((l) => l.garment === active)!,
@@ -154,6 +156,42 @@ export function StudioShell({ initialDesign }: { initialDesign: Design }) {
       updateLayer(active, { decorations: list })
     },
     [active, activeLayer.decorations, selectedId, updateLayer],
+  )
+
+  const handleUploadImage = useCallback(
+    async (file: File) => {
+      setUploading(true)
+      try {
+        const body = new FormData()
+        body.append('file', file)
+        const res = await fetch('/api/upload', { method: 'POST', body })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Upload failed')
+
+        const { aspect, avgColor } = await loadImageMeta(data.url)
+        // Fit the image inside a ~0.42 normalized box, preserving aspect ratio.
+        const maxDim = 0.42
+        const w = aspect >= 1 ? maxDim : maxDim * aspect
+        const h = aspect >= 1 ? maxDim / aspect : maxDim
+        const deco = makeDecoration('image', 0.5, 0.5, avgColor, '#00000000', {
+          src: data.url,
+          w,
+          h,
+        })
+        setView('draw')
+        updateLayer(active, {
+          decorations: [...activeLayer.decorations, deco],
+        })
+        setTool('select')
+        setSelectedId(deco.id)
+        toast.success('Image added to your design')
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Upload failed')
+      } finally {
+        setUploading(false)
+      }
+    },
+    [active, activeLayer.decorations, updateLayer],
   )
 
   const bringToLife = useCallback(() => {
@@ -308,6 +346,8 @@ export function StudioShell({ initialDesign }: { initialDesign: Design }) {
             onDeleteSelected={deleteSelected}
             onDuplicateSelected={duplicateSelected}
             onReorderSelected={reorderSelected}
+            onUploadImage={handleUploadImage}
+            uploading={uploading}
           />
         </aside>
 
