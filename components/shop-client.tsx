@@ -1,22 +1,16 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
-import { Loader2, Shirt, ShoppingBag, Check, Factory } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Shirt, ShoppingBag, Check, Factory, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import type { Design, DesignLayer } from '@/lib/types'
-import { getDesignBySlug } from '@/lib/storage'
 import { GARMENT_LABEL, stylesFor } from '@/lib/garments'
 import { priceDesign, formatUSD, type GarmentPrice } from '@/lib/pricing'
+import { addToCart } from '@/app/actions/cart'
 import { GarmentThumb } from '@/components/garment-thumb'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog'
 
 function variantName(layer: DesignLayer) {
   return (
@@ -25,25 +19,17 @@ function variantName(layer: DesignLayer) {
   )
 }
 
-export function ShopClient({ slug }: { slug: string }) {
-  const [design, setDesign] = useState<Design | null>(null)
-  const [status, setStatus] = useState<'loading' | 'found' | 'missing'>(
-    'loading',
-  )
-  const [cart, setCart] = useState<Record<string, boolean>>({})
-  const [checkout, setCheckout] = useState(false)
-  const [ordered, setOrdered] = useState(false)
-
-  useEffect(() => {
-    const found = getDesignBySlug(slug)
-    if (found) {
-      setDesign(found)
-      setCart(Object.fromEntries(found.layers.map((l) => [l.garment, true])))
-      setStatus('found')
-    } else {
-      setStatus('missing')
-    }
-  }, [slug])
+export function ShopClient({
+  design,
+  signedIn,
+}: {
+  design: Design | null
+  signedIn: boolean
+}) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  const [addingGarment, setAddingGarment] = useState<string | null>(null)
+  const [added, setAdded] = useState<Record<string, boolean>>({})
 
   const price = useMemo(() => (design ? priceDesign(design) : null), [design])
 
@@ -53,37 +39,42 @@ export function ShopClient({ slug }: { slug: string }) {
     return m
   }, [price])
 
-  const cartTotal = useMemo(() => {
-    if (!design || !price) return 0
-    return design.layers.reduce((sum, l) => {
-      if (!cart[l.garment]) return sum
-      return sum + (priceByGarment.get(l.garment)?.total ?? 0)
-    }, 0)
-  }, [design, price, cart, priceByGarment])
-
-  const selectedCount = Object.values(cart).filter(Boolean).length
-
-  if (status === 'loading') {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-secondary/30">
-        <Loader2 className="size-7 animate-spin text-primary" />
-      </div>
-    )
-  }
-
-  if (status === 'missing' || !design || !price) {
+  if (!design || !price) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-secondary/30 px-6 text-center">
         <h1 className="font-heading text-2xl font-bold">Shop not found</h1>
         <p className="max-w-sm text-muted-foreground">
-          This shop link may not exist yet, or it was created in a different
-          browser. Designs are saved locally in this demo.
+          This shop link may not exist yet, or the design hasn&apos;t been
+          published.
         </p>
         <Button asChild>
           <Link href="/">Back home</Link>
         </Button>
       </div>
     )
+  }
+
+  const handleAdd = (layer: DesignLayer) => {
+    if (!signedIn) {
+      router.push(`/login?next=/shop/${design.slug}`)
+      return
+    }
+    setAddingGarment(layer.garment)
+    startTransition(async () => {
+      try {
+        await addToCart({
+          designId: design.id,
+          designTitle: design.title,
+          layer,
+        })
+        setAdded((a) => ({ ...a, [layer.garment]: true }))
+        toast.success(`${GARMENT_LABEL[layer.garment]} added to cart`)
+      } catch {
+        toast.error('Could not add to cart')
+      } finally {
+        setAddingGarment(null)
+      }
+    })
   }
 
   return (
@@ -96,9 +87,14 @@ export function ShopClient({ slug }: { slug: string }) {
             </span>
             <span className="font-heading text-xl font-extrabold">Loomly</span>
           </Link>
-          <span className="text-sm font-semibold text-muted-foreground">
-            Designer shop
-          </span>
+          <div className="flex items-center gap-2">
+            <Button asChild variant="ghost" size="sm" className="font-semibold">
+              <Link href="/cart">
+                <ShoppingBag className="size-4" />
+                Cart
+              </Link>
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -119,7 +115,8 @@ export function ShopClient({ slug }: { slug: string }) {
         <div className="mt-10 grid gap-6 lg:grid-cols-3">
           {design.layers.map((layer) => {
             const gp = priceByGarment.get(layer.garment)
-            const inCart = !!cart[layer.garment]
+            const isAdded = !!added[layer.garment]
+            const busy = addingGarment === layer.garment && pending
             return (
               <div
                 key={layer.garment}
@@ -139,22 +136,23 @@ export function ShopClient({ slug }: { slug: string }) {
                     {formatUSD(gp?.total ?? 0)}
                   </p>
                   <Button
-                    variant={inCart ? 'secondary' : 'default'}
+                    variant={isAdded ? 'secondary' : 'default'}
                     className="mt-4 font-semibold"
-                    onClick={() =>
-                      setCart((c) => ({
-                        ...c,
-                        [layer.garment]: !c[layer.garment],
-                      }))
-                    }
+                    onClick={() => handleAdd(layer)}
+                    disabled={busy}
                   >
-                    {inCart ? (
+                    {busy ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : isAdded ? (
                       <>
                         <Check className="size-4" />
-                        Added
+                        Added — add another
                       </>
                     ) : (
-                      'Add to order'
+                      <>
+                        <ShoppingBag className="size-4" />
+                        Add to cart
+                      </>
                     )}
                   </Button>
                 </div>
@@ -163,15 +161,13 @@ export function ShopClient({ slug }: { slug: string }) {
           })}
         </div>
 
-        <div className="mx-auto mt-10 max-w-md rounded-3xl border-2 border-border bg-card p-6 shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="font-semibold text-muted-foreground">
-              {selectedCount} item{selectedCount === 1 ? '' : 's'} selected
+        <div className="mx-auto mt-10 max-w-md rounded-3xl border-2 border-border bg-card p-6 text-center shadow-sm">
+          <p className="text-sm text-muted-foreground">
+            Full bundle{' '}
+            <span className="font-heading text-xl font-extrabold text-foreground">
+              {formatUSD(price.total)}
             </span>
-            <span className="font-heading text-2xl font-extrabold">
-              {formatUSD(cartTotal)}
-            </span>
-          </div>
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">
             You&apos;d normally pay around{' '}
             <span className="font-semibold line-through">
@@ -180,51 +176,17 @@ export function ShopClient({ slug }: { slug: string }) {
             for a comparable custom bundle.
           </p>
           <Button
+            asChild
             size="lg"
             className="mt-4 w-full font-bold shadow-md"
-            disabled={selectedCount === 0}
-            onClick={() => setCheckout(true)}
           >
-            <ShoppingBag className="size-5" />
-            Checkout
+            <Link href="/cart">
+              <ShoppingBag className="size-5" />
+              Go to cart &amp; checkout
+            </Link>
           </Button>
         </div>
       </main>
-
-      <Dialog open={checkout} onOpenChange={setCheckout}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {ordered ? 'Order placed!' : 'Confirm your order'}
-            </DialogTitle>
-            <DialogDescription>
-              {ordered
-                ? 'This is a demo, so no payment was taken — but in the real thing your design would head to a partner factory now.'
-                : `${selectedCount} item${
-                    selectedCount === 1 ? '' : 's'
-                  } for ${formatUSD(cartTotal)}, made to order.`}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            {ordered ? (
-              <Button
-                onClick={() => {
-                  setCheckout(false)
-                  setOrdered(false)
-                }}
-                className="font-semibold"
-              >
-                Done
-              </Button>
-            ) : (
-              <Button onClick={() => setOrdered(true)} className="font-semibold">
-                <Check className="size-4" />
-                Place demo order
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

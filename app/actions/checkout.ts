@@ -36,7 +36,7 @@ export async function createCheckoutSession(): Promise<{ clientSecret: string }>
   const orderId = uid()
 
   const checkout = await stripe.checkout.sessions.create({
-    ui_mode: 'embedded',
+    ui_mode: 'embedded_page',
     mode: 'payment',
     redirect_on_completion: 'never',
     billing_address_collection: 'required',

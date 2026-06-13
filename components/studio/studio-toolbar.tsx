@@ -44,7 +44,7 @@ const TOOLS: { id: EditorTool; label: string; icon: typeof Circle }[] = [
   { id: 'triangle', label: 'Triangle', icon: Triangle },
   { id: 'star', label: 'Star', icon: Star },
   { id: 'line', label: 'Line', icon: Minus },
-  { id: 'brush', label: 'Brush', icon: Brush },
+  { id: 'path', label: 'Brush', icon: Brush },
 ]
 
 export function StudioToolbar({

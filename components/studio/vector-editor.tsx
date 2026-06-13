@@ -139,7 +139,7 @@ export function VectorEditor({
       }
 
       // shape tools
-      if (tool === 'brush' || tool === 'line') {
+      if (tool === 'path' || tool === 'line') {
         const deco = makeDecoration(tool, x, y, color, stroke)
         deco.points = [{ x, y }]
         if (tool === 'line') deco.points = [{ x, y }, { x, y }]
@@ -249,7 +249,7 @@ export function VectorEditor({
   }
 
   const cursor =
-    tool === 'select' ? 'default' : tool === 'brush' ? 'crosshair' : 'copy'
+    tool === 'select' ? 'default' : tool === 'path' ? 'crosshair' : 'copy'
 
   return (
     <div className="flex flex-col items-center gap-3">
@@ -354,8 +354,8 @@ export function VectorEditor({
           ? selected
             ? 'Drag to move • corner to resize • top dot to rotate'
             : 'Tap a shape to select it'
-          : tool === 'brush'
-            ? 'Click and drag to paint a freehand stroke'
+            : tool === 'path'
+              ? 'Click and drag to paint a freehand stroke'
             : tool === 'line'
               ? 'Click and drag to draw a line'
               : 'Click on the garment to place the shape'}
