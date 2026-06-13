@@ -6,21 +6,27 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft,
-  Sparkles,
   Save,
   Share2,
   Wand2,
   Loader2,
+  ShoppingBag,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { Design, DesignLayer, GarmentType, PaintCell } from '@/lib/types'
+import type {
+  Decoration,
+  Design,
+  DesignLayer,
+  GarmentType,
+} from '@/lib/types'
 import { GARMENT_LABEL } from '@/lib/garments'
-import { saveDesign, publishDesign } from '@/lib/storage'
+import { saveDesign, publishDesign } from '@/app/actions/designs'
+import { addToCart } from '@/app/actions/cart'
 import { priceDesign, formatUSD } from '@/lib/pricing'
-import { useAuth } from '@/lib/auth'
+import { uid } from '@/lib/decorations'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { PaintCanvas } from './paint-canvas'
+import { VectorEditor, type EditorTool } from './vector-editor'
 import { StudioToolbar } from './studio-toolbar'
 import { WizardPanel } from './wizard-panel'
 
@@ -36,33 +42,47 @@ const GarmentViewer = dynamic(
   },
 )
 
-type Tool = 'paint' | 'erase' | 'fill'
-
 const GARMENTS: GarmentType[] = ['head', 'shirt', 'sweatpants']
 
 export function StudioShell({ initialDesign }: { initialDesign: Design }) {
   const router = useRouter()
-  const { user } = useAuth()
   const [design, setDesign] = useState<Design>(initialDesign)
   const [active, setActive] = useState<GarmentType>('head')
-  const [tool, setTool] = useState<Tool>('paint')
+  const [tool, setTool] = useState<EditorTool>('select')
   const [color, setColor] = useState('#e8705a')
+  const [stroke, setStroke] = useState('#2b2b2b')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<'draw' | '3d'>('draw')
   const [playKey, setPlayKey] = useState(0)
   const [publishing, setPublishing] = useState(false)
+  const [addingId, setAddingId] = useState<GarmentType | null>(null)
 
   const activeLayer = useMemo(
     () => design.layers.find((l) => l.garment === active)!,
     [design.layers, active],
   )
 
+  const selected =
+    activeLayer.decorations.find((d) => d.id === selectedId) ?? null
+
   const price = useMemo(() => priceDesign(design), [design])
 
-  // autosave (debounced) whenever the design changes
+  // Debounced autosave to the database whenever the design changes.
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const firstRender = useRef(true)
   useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false
+      return
+    }
     if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => saveDesign(design), 600)
+    saveTimer.current = setTimeout(() => {
+      void saveDesign({
+        id: design.id,
+        title: design.title,
+        layers: design.layers,
+      }).catch(() => {})
+    }, 700)
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
@@ -80,9 +100,60 @@ export function StudioShell({ initialDesign }: { initialDesign: Design }) {
     [],
   )
 
-  const handleCells = useCallback(
-    (cells: PaintCell[]) => updateLayer(active, { cells }),
+  const handleDecorations = useCallback(
+    (decorations: Decoration[]) =>
+      updateLayer(active, { decorations }),
     [active, updateLayer],
+  )
+
+  const updateSelected = useCallback(
+    (patch: Partial<Decoration>) => {
+      if (!selectedId) return
+      updateLayer(active, {
+        decorations: activeLayer.decorations.map((d) =>
+          d.id === selectedId ? { ...d, ...patch } : d,
+        ),
+      })
+    },
+    [active, activeLayer.decorations, selectedId, updateLayer],
+  )
+
+  const deleteSelected = useCallback(() => {
+    if (!selectedId) return
+    updateLayer(active, {
+      decorations: activeLayer.decorations.filter((d) => d.id !== selectedId),
+    })
+    setSelectedId(null)
+  }, [active, activeLayer.decorations, selectedId, updateLayer])
+
+  const duplicateSelected = useCallback(() => {
+    if (!selected) return
+    const copy: Decoration = {
+      ...selected,
+      id: uid(),
+      x: Math.min(0.95, selected.x + 0.05),
+      y: Math.min(0.95, selected.y + 0.05),
+      points: selected.points?.map((p) => ({
+        x: Math.min(1, p.x + 0.05),
+        y: Math.min(1, p.y + 0.05),
+      })),
+    }
+    updateLayer(active, { decorations: [...activeLayer.decorations, copy] })
+    setSelectedId(copy.id)
+  }, [active, activeLayer.decorations, selected, updateLayer])
+
+  const reorderSelected = useCallback(
+    (dir: 'up' | 'down') => {
+      if (!selectedId) return
+      const list = [...activeLayer.decorations]
+      const i = list.findIndex((d) => d.id === selectedId)
+      if (i < 0) return
+      const j = dir === 'up' ? i + 1 : i - 1
+      if (j < 0 || j >= list.length) return
+      ;[list[i], list[j]] = [list[j], list[i]]
+      updateLayer(active, { decorations: list })
+    },
+    [active, activeLayer.decorations, selectedId, updateLayer],
   )
 
   const bringToLife = useCallback(() => {
@@ -90,21 +161,58 @@ export function StudioShell({ initialDesign }: { initialDesign: Design }) {
     setPlayKey((k) => k + 1)
   }, [])
 
-  const handleSave = useCallback(() => {
-    saveDesign(design)
+  const handleSave = useCallback(async () => {
+    await saveDesign({
+      id: design.id,
+      title: design.title,
+      layers: design.layers,
+    })
     toast.success('Design saved')
   }, [design])
 
-  const handlePublish = useCallback(() => {
+  const handlePublish = useCallback(async () => {
     setPublishing(true)
-    const published = publishDesign(design.id)
-    setPublishing(false)
-    if (published) {
-      setDesign(published)
+    try {
+      await saveDesign({
+        id: design.id,
+        title: design.title,
+        layers: design.layers,
+      })
+      const published = await publishDesign(design.id)
+      setDesign((d) => ({ ...d, published: true, slug: published.slug }))
       toast.success('Shop published!')
       router.push(`/shop/${published.slug}`)
+    } catch {
+      toast.error('Could not publish. Try again.')
+    } finally {
+      setPublishing(false)
     }
-  }, [design.id, router])
+  }, [design, router])
+
+  const handleAddToCart = useCallback(
+    async (garment: GarmentType) => {
+      setAddingId(garment)
+      const layer = design.layers.find((l) => l.garment === garment)!
+      try {
+        await saveDesign({
+          id: design.id,
+          title: design.title,
+          layers: design.layers,
+        })
+        await addToCart({
+          designId: design.id,
+          designTitle: design.title,
+          layer,
+        })
+        toast.success(`${GARMENT_LABEL[garment]} added to cart`)
+      } catch {
+        toast.error('Could not add to cart')
+      } finally {
+        setAddingId(null)
+      }
+    },
+    [design],
+  )
 
   return (
     <div className="flex min-h-dvh flex-col bg-secondary/30">
@@ -160,6 +268,7 @@ export function StudioShell({ initialDesign }: { initialDesign: Design }) {
             onClick={() => {
               setActive(g)
               setView('draw')
+              setSelectedId(null)
             }}
             className={
               'whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-bold transition-colors ' +
@@ -183,11 +292,22 @@ export function StudioShell({ initialDesign }: { initialDesign: Design }) {
             color={color}
             tool={tool}
             baseColor={activeLayer.baseColor}
-            onTool={setTool}
+            selected={selected}
+            onTool={(t) => {
+              setTool(t)
+              if (t !== 'select') setSelectedId(null)
+            }}
             onColor={setColor}
             onVariant={(v) => updateLayer(active, { variant: v })}
             onBaseColor={(c) => updateLayer(active, { baseColor: c })}
-            onClear={() => updateLayer(active, { cells: [] })}
+            onClear={() => {
+              updateLayer(active, { decorations: [] })
+              setSelectedId(null)
+            }}
+            onUpdateSelected={updateSelected}
+            onDeleteSelected={deleteSelected}
+            onDuplicateSelected={duplicateSelected}
+            onReorderSelected={reorderSelected}
           />
         </aside>
 
@@ -198,7 +318,7 @@ export function StudioShell({ initialDesign }: { initialDesign: Design }) {
               active={view === 'draw'}
               onClick={() => setView('draw')}
             >
-              Draw
+              Design
             </ToggleChip>
             <ToggleChip active={view === '3d'} onClick={() => setView('3d')}>
               3D Preview
@@ -207,11 +327,15 @@ export function StudioShell({ initialDesign }: { initialDesign: Design }) {
 
           <div className="flex flex-1 items-center justify-center">
             {view === 'draw' ? (
-              <PaintCanvas
+              <VectorEditor
                 layer={activeLayer}
-                color={color}
                 tool={tool}
-                onChange={handleCells}
+                color={color}
+                stroke={stroke}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                onChange={handleDecorations}
+                onToolHandled={() => setTool('select')}
               />
             ) : (
               <div className="h-[460px] w-full">
@@ -220,14 +344,30 @@ export function StudioShell({ initialDesign }: { initialDesign: Design }) {
             )}
           </div>
 
-          <div className="mt-4 flex justify-center">
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
             <Button
               size="lg"
+              variant="secondary"
               onClick={bringToLife}
-              className="font-semibold shadow-md"
+              className="font-semibold shadow-sm"
             >
               <Wand2 className="size-5" />
               Bring it to life
+            </Button>
+            <Button
+              size="lg"
+              onClick={() => handleAddToCart(active)}
+              disabled={addingId === active}
+              className="font-semibold shadow-md"
+            >
+              {addingId === active ? (
+                <Loader2 className="size-5 animate-spin" />
+              ) : (
+                <ShoppingBag className="size-5" />
+              )}
+              Add {GARMENT_LABEL[active]} — {formatUSD(
+                price.perGarment.find((g) => g.garment === active)?.total ?? 0,
+              )}
             </Button>
           </div>
         </section>
@@ -236,7 +376,11 @@ export function StudioShell({ initialDesign }: { initialDesign: Design }) {
         <aside className="order-3 flex flex-col rounded-3xl border border-border bg-card p-0 shadow-sm">
           <WizardPanel
             layer={activeLayer}
-            onApply={(patch) => updateLayer(active, patch)}
+            color={color}
+            onApply={(patch) => {
+              updateLayer(active, patch)
+              setSelectedId(null)
+            }}
           />
         </aside>
       </div>

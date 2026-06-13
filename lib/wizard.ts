@@ -1,11 +1,11 @@
-import type { DesignLayer, PaintCell, WizardMessage } from './types'
-import { GRID, PALETTE } from './garments'
-import { buildMask } from './shapes'
+import type { Decoration, DesignLayer, WizardMessage } from './types'
+import { PALETTE } from './garments'
+import { makeDecoration, uid } from './decorations'
 
 // Mock "AI design wizard". It interprets a natural-language prompt and returns
-// a friendly reply plus an optional patch to the active garment layer. This is
-// isolated so it can later be replaced by a real model (e.g. fal for image gen
-// + a text model for chat) without changing the WizardPanel UI.
+// a friendly reply plus an optional patch to the active garment layer. Now it
+// emits smooth vector decorations (the refined model) rather than pixel cells.
+// Isolated so it can later be swapped for a real model without UI changes.
 
 export type WizardResult = {
   reply: string
@@ -46,143 +46,139 @@ function findColors(text: string): string[] {
   return hits
 }
 
-function insideCells(layer: DesignLayer): number[] {
-  const mask = buildMask(layer.garment, layer.variant)
-  const out: number[] = []
-  for (let i = 0; i < mask.length; i++) if (mask[i]) out.push(i)
-  return out
-}
-
 function rng(seed: number) {
   let s = seed % 2147483647
   if (s <= 0) s += 2147483646
   return () => (s = (s * 16807) % 2147483647) / 2147483647
 }
 
-/** Fill every inside cell with a color (base recolor + clear paint cells). */
-function recolor(layer: DesignLayer, hex: string): Partial<DesignLayer> {
-  return { baseColor: hex, cells: [] }
-}
-
-/** Sprinkle random dots across the garment. */
-function dots(layer: DesignLayer, colors: string[], density = 0.18): PaintCell[] {
-  const inside = insideCells(layer)
-  const rand = rng(inside.length + colors.length * 7)
-  const cells: PaintCell[] = []
-  for (const i of inside) {
-    if (rand() < density) {
-      cells.push({ i, color: colors[Math.floor(rand() * colors.length)] })
-    }
+/** Horizontal stripes as full-width rectangles. */
+function stripes(colors: string[]): Decoration[] {
+  const out: Decoration[] = []
+  const bands = 5
+  for (let i = 0; i < bands; i++) {
+    if (i % 2 === 1) continue
+    const cy = (i + 0.5) / bands
+    out.push({
+      id: uid(),
+      kind: 'rect',
+      x: 0.5,
+      y: cy,
+      w: 1.1,
+      h: 1 / bands,
+      rotation: 0,
+      fill: colors[(i / 2) % colors.length] ?? colors[0],
+      stroke: 'transparent',
+      strokeWidth: 0,
+    })
   }
-  return cells
+  return out
 }
 
-/** Horizontal stripes. */
-function stripes(layer: DesignLayer, colors: string[]): PaintCell[] {
-  const { cols, rows } = GRID[layer.garment]
-  const inside = new Set(insideCells(layer))
-  const cells: PaintCell[] = []
-  const band = Math.max(1, Math.floor(rows / 9))
-  for (let r = 0; r < rows; r++) {
-    if (Math.floor(r / band) % 2 !== 0) continue
-    const color = colors[Math.floor(r / band) % colors.length]
-    for (let c = 0; c < cols; c++) {
-      const i = r * cols + c
-      if (inside.has(i)) cells.push({ i, color })
-    }
+/** Scattered dots as small circles. */
+function dots(colors: string[], count = 14): Decoration[] {
+  const rand = rng(count + colors.length * 7)
+  const out: Decoration[] = []
+  for (let i = 0; i < count; i++) {
+    const size = 0.06 + rand() * 0.06
+    const dec = makeDecoration(
+      'circle',
+      0.1 + rand() * 0.8,
+      0.1 + rand() * 0.8,
+      colors[Math.floor(rand() * colors.length)],
+      'transparent',
+    )
+    dec.w = size
+    dec.h = size
+    dec.strokeWidth = 0
+    out.push(dec)
   }
-  return cells
+  return out
 }
 
-/** A centered heart motif. */
-function heart(layer: DesignLayer, hex: string): PaintCell[] {
-  const { cols, rows } = GRID[layer.garment]
-  const inside = new Set(insideCells(layer))
-  const cells: PaintCell[] = []
-  const cx = 0.5
-  const cy = 0.52
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const x = (c / (cols - 1) - cx) * 2.4
-      const y = -(r / (rows - 1) - cy) * 2.4
-      const v = Math.pow(x * x + y * y - 0.3, 3) - x * x * y * y * y
-      const i = r * cols + c
-      if (v <= 0 && inside.has(i)) cells.push({ i, color: hex })
-    }
-  }
-  return cells
+/** A centered star motif. */
+function starMotif(hex: string): Decoration[] {
+  const dec = makeDecoration('star', 0.5, 0.5, hex, '#2b2b2b')
+  dec.w = 0.42
+  dec.h = 0.42
+  return [dec]
 }
 
-export function runWizard(prompt: string, layer: DesignLayer): WizardResult {
+export function runWizard(
+  prompt: string,
+  layer: DesignLayer,
+  drawColor: string,
+): WizardResult {
   const text = prompt.toLowerCase().trim()
   const colors = findColors(text)
-  const palette = colors.length ? colors : PALETTE.slice(0, 4)
+  const palette = colors.length ? colors : [drawColor, ...PALETTE.slice(0, 3)]
 
-  // pattern intents
   if (/\bstrip|stripe|striped\b/.test(text)) {
     return {
-      reply: `Done! I laid down some cozy stripes${
+      reply: `Done! I laid down some clean stripes${
         colors.length ? ' in your colors' : ''
-      }. Want me to add a motif on top?`,
-      patch: { cells: stripes(layer, palette) },
-      suggestions: ['Add a heart', 'Make it polka dots', 'Try a different palette'],
+      }. Want a motif on top?`,
+      patch: { decorations: [...layer.decorations, ...stripes(palette)] },
+      suggestions: ['Add a star', 'Make it polka dots', 'Different palette'],
     }
   }
   if (/\bpolka|dot|dots|spots|speckle\b/.test(text)) {
     return {
-      reply: 'Sprinkled some playful dots across it. Cute, right?',
-      patch: { cells: dots(layer, palette) },
-      suggestions: ['More dots', 'Fewer dots', 'Switch to stripes'],
+      reply: 'Sprinkled some playful dots across it.',
+      patch: { decorations: [...layer.decorations, ...dots(palette)] },
+      suggestions: ['More dots', 'Add stripes', 'Add a star'],
     }
   }
-  if (/\bheart|love|valentine\b/.test(text)) {
+  if (/\bstar|sparkle\b/.test(text)) {
     return {
-      reply: 'Aww, added a big heart right in the middle.',
-      patch: { cells: heart(layer, palette[0]) },
-      suggestions: ['Make the heart pink', 'Add stripes behind it'],
+      reply: 'Popped a big star right in the middle.',
+      patch: {
+        decorations: [...layer.decorations, ...starMotif(palette[0])],
+      },
+      suggestions: ['Make it gold', 'Add stripes behind it'],
     }
   }
   if (/\bclear|reset|blank|erase all|start over\b/.test(text)) {
     return {
-      reply: 'Cleared the canvas so you have a fresh start.',
-      patch: { cells: [] },
-      suggestions: ['Add stripes', 'Add polka dots', 'Pick a base color'],
+      reply: 'Cleared the canvas for a fresh start.',
+      patch: { decorations: [] },
+      suggestions: ['Add stripes', 'Add polka dots', 'Pick a fabric color'],
     }
   }
-  if (colors.length && /\b(base|whole|all|solid|recolor|color it)\b/.test(text)) {
+  if (
+    colors.length &&
+    /\b(base|whole|all|solid|recolor|color it|fabric)\b/.test(text)
+  ) {
     return {
-      reply: `Recolored the whole garment. Looks clean!`,
-      patch: recolor(layer, colors[0]),
-      suggestions: ['Add a pattern', 'Add a heart'],
+      reply: 'Recolored the fabric. Looks clean!',
+      patch: { baseColor: colors[0] },
+      suggestions: ['Add a pattern', 'Add a star'],
     }
   }
-
-  // "fill in the gaps" / surprise me
   if (/\bfill|gaps|surprise|finish|complete|auto|magic|idea\b/.test(text)) {
-    const result =
-      Math.random() < 0.5
-        ? dots(layer, palette, 0.22)
-        : stripes(layer, palette)
+    const deco =
+      Math.random() < 0.5 ? dots(palette, 18) : stripes(palette)
     return {
-      reply:
-        'I filled in the gaps with a design I think fits! Tweak it or ask for something else.',
-      patch: { cells: result, baseColor: palette[palette.length - 1] },
-      suggestions: ['Make it bolder', 'Calmer colors', 'Add a heart'],
+      reply: 'I filled it in with a design I think fits! Tweak away.',
+      patch: {
+        baseColor: palette[palette.length - 1],
+        decorations: [...layer.decorations, ...deco],
+      },
+      suggestions: ['Make it bolder', 'Calmer colors', 'Add a star'],
     }
   }
-
   if (colors.length) {
     return {
-      reply: `Nice palette! I set the base color for you — tell me a pattern (stripes, dots, heart) and I'll paint it.`,
-      patch: recolor(layer, colors[0]),
+      reply:
+        'Nice palette! I set the fabric color — tell me a pattern (stripes, dots, star) and I\u2019ll add it.',
+      patch: { baseColor: colors[0] },
       suggestions: ['Add stripes', 'Add polka dots', 'Surprise me'],
     }
   }
 
-  // fallback
   return {
     reply:
-      "I'm your design buddy! Try things like \"make it sky blue with stripes\", \"add polka dots\", \"put a heart on it\", or \"surprise me\".",
+      'I\u2019m your design buddy! Try "make it sky blue with stripes", "add polka dots", "put a star on it", or "surprise me".',
     suggestions: ['Surprise me', 'Add stripes', 'Make it teal'],
   }
 }
@@ -191,7 +187,7 @@ export function welcomeMessage(): WizardMessage {
   return {
     id: 'welcome',
     role: 'wizard',
-    text: "Hi! I'm your design buddy. Describe a vibe and I'll paint it onto your garment — colors, stripes, dots, hearts, or I can just surprise you.",
+    text: "Hi! I'm your design buddy. Describe a vibe and I'll add smooth shapes to your garment — colors, stripes, dots, stars, or I can surprise you.",
     suggestions: ['Surprise me', 'Make it teal with stripes', 'Add polka dots'],
   }
 }

@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 
 type Props = {
   layer: DesignLayer
+  color: string
   onApply: (patch: Partial<DesignLayer>) => void
 }
 
@@ -17,7 +18,7 @@ function uid() {
   return Math.random().toString(36).slice(2, 9)
 }
 
-export function WizardPanel({ layer, onApply }: Props) {
+export function WizardPanel({ layer, color, onApply }: Props) {
   const [messages, setMessages] = useState<WizardMessage[]>([welcomeMessage()])
   const [input, setInput] = useState('')
   const [thinking, setThinking] = useState(false)
@@ -40,7 +41,7 @@ export function WizardPanel({ layer, onApply }: Props) {
       // simulate model latency
       setTimeout(
         () => {
-          const result = runWizard(prompt, layer)
+          const result = runWizard(prompt, layer, color)
           if (result.patch) onApply(result.patch)
           setMessages((m) => [
             ...m,
@@ -56,7 +57,7 @@ export function WizardPanel({ layer, onApply }: Props) {
         650 + Math.random() * 500,
       )
     },
-    [layer, onApply, thinking],
+    [layer, color, onApply, thinking],
   )
 
   return (

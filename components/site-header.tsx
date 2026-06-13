@@ -2,8 +2,8 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Shirt, LogOut } from 'lucide-react'
-import { useAuth } from '@/lib/auth'
+import { Shirt, LogOut, ShoppingBag } from 'lucide-react'
+import { useAuth } from '@/lib/use-auth'
 import { Button } from '@/components/ui/button'
 
 export function SiteHeader() {
@@ -46,6 +46,17 @@ export function SiteHeader() {
         <div className="flex items-center gap-2">
           {ready && user ? (
             <>
+              <Button
+                asChild
+                variant="ghost"
+                size="icon"
+                className="font-semibold"
+                aria-label="Cart"
+              >
+                <Link href="/cart">
+                  <ShoppingBag className="size-4" />
+                </Link>
+              </Button>
               <Button asChild variant="ghost" className="font-semibold">
                 <Link href="/dashboard">My studio</Link>
               </Button>

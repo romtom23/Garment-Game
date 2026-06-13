@@ -1,34 +1,13 @@
-'use client'
+import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
+import { auth } from '@/lib/auth'
+import { createDesign } from '@/app/actions/designs'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { Loader2 } from 'lucide-react'
-import { useAuth } from '@/lib/auth'
-import { createDesign } from '@/lib/storage'
-import { StudioShell } from '@/components/studio/studio-shell'
-import type { Design } from '@/lib/types'
+export default async function StudioPage() {
+  const session = await auth.api.getSession({ headers: await headers() })
+  if (!session?.user) redirect('/login?next=/studio')
 
-export default function StudioPage() {
-  const { user, ready } = useAuth()
-  const router = useRouter()
-  const [design, setDesign] = useState<Design | null>(null)
-
-  useEffect(() => {
-    if (!ready) return
-    if (!user) {
-      router.replace('/login?next=/studio')
-      return
-    }
-    setDesign(createDesign(user.id))
-  }, [user, ready, router])
-
-  if (!design) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center bg-secondary/30">
-        <Loader2 className="size-7 animate-spin text-primary" />
-      </div>
-    )
-  }
-
-  return <StudioShell initialDesign={design} />
+  // Create a fresh design server-side, then send the user into the editor.
+  const design = await createDesign()
+  redirect(`/studio/${design.id}`)
 }

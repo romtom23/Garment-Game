@@ -4,13 +4,12 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2, Shirt } from 'lucide-react'
-import { useAuth } from '@/lib/auth'
+import { authClient } from '@/lib/auth-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
-  const { login, signup } = useAuth()
   const router = useRouter()
   const params = useSearchParams()
   const next = params.get('next') || '/dashboard'
@@ -27,14 +26,17 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
     e.preventDefault()
     setError(null)
     setBusy(true)
-    try {
-      if (isSignup) await signup(name, email, password)
-      else await login(email, password)
-      router.push(next)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong')
+    const { error: authError } = isSignup
+      ? await authClient.signUp.email({ email, password, name })
+      : await authClient.signIn.email({ email, password })
+
+    if (authError) {
+      setError(authError.message || 'Something went wrong')
       setBusy(false)
+      return
     }
+    router.push(next)
+    router.refresh()
   }
 
   return (

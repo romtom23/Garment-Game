@@ -1,7 +1,6 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata } from 'next'
 import { Baloo_2, Nunito } from 'next/font/google'
-import { AuthProvider } from '@/lib/auth'
 import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
 
@@ -51,7 +50,7 @@ export default function RootLayout({
       className={`${baloo.variable} ${nunito.variable} bg-background`}
     >
       <body className="font-sans antialiased">
-        <AuthProvider>{children}</AuthProvider>
+        {children}
         <Toaster richColors position="top-center" />
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { DesignLayer } from './types'
 import { GRID } from './garments'
 import { buildMask } from './shapes'
+import { colorAtPoint } from './decorations'
 
 // Builds a cohesive "pillow" geometry for a garment: the silhouette of grid
 // cells puffed outward on both faces. Puff height is sampled at shared grid
@@ -12,8 +13,18 @@ export function buildGarmentGeometry(layer: DesignLayer): THREE.BufferGeometry {
   const { cols, rows } = GRID[layer.garment]
   const mask = buildMask(layer.garment, layer.variant)
 
+  // Sample the vector decorations at each cell center to get its color. This
+  // bakes the smooth 2D design onto the puffed grid mesh.
   const colorMap = new Map<number, string>()
-  for (const c of layer.cells) colorMap.set(c.i, c.color)
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      const i = cy * cols + cx
+      if (!mask[i]) continue
+      const px = (cx + 0.5) / cols
+      const py = (cy + 0.5) / rows
+      colorMap.set(i, colorAtPoint(layer, px, py))
+    }
+  }
 
   // ---- vertex grid: (cols+1) x (rows+1) ----
   const vCols = cols + 1

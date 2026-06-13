@@ -10,9 +10,9 @@ const FACTORY_BASE: Record<GarmentType, number> = {
 /** Our markup over factory cost. Lower because partners already run the line. */
 const MARGIN = 0.45
 
-/** Each painted cell adds a tiny print cost; capped so designs stay affordable. */
-const PER_CELL = 0.04
-const CELL_CAP = 9
+/** Each placed decoration adds a small print cost; capped so designs stay affordable. */
+const PER_DECORATION = 0.6
+const DECORATION_CAP = 9
 
 export type GarmentPrice = {
   garment: GarmentType
@@ -32,7 +32,10 @@ export type DesignPrice = {
 
 function priceLayer(layer: DesignLayer): GarmentPrice {
   const factory = FACTORY_BASE[layer.garment]
-  const designCost = Math.min(CELL_CAP, layer.cells.length * PER_CELL)
+  const designCost = Math.min(
+    DECORATION_CAP,
+    layer.decorations.length * PER_DECORATION,
+  )
   const total = factory * (1 + MARGIN) + designCost
   return {
     garment: layer.garment,
@@ -56,6 +59,11 @@ export function priceDesign(design: Design): DesignPrice {
   }
 }
 
+/** Price for a single garment layer (used by the cart / add-to-cart flow). */
+export function priceSingleLayer(layer: DesignLayer): number {
+  return priceLayer(layer).total
+}
+
 function round(n: number) {
   return Math.round(n * 100) / 100
 }
@@ -66,4 +74,9 @@ export function formatUSD(n: number): string {
     currency: 'USD',
     minimumFractionDigits: 2,
   })
+}
+
+/** Dollars -> integer cents for Stripe / DB storage. */
+export function toCents(dollars: number): number {
+  return Math.round(dollars * 100)
 }
