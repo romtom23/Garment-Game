@@ -1,97 +1,134 @@
 import type { GarmentType } from './types'
 import { GRID } from './garments'
+import { silhouettePaths } from './silhouettes'
 
 /**
- * Returns a boolean mask (length cols*rows) describing which grid cells are
- * "inside" the garment silhouette for the given variant. The silhouette is
- * built procedurally so the 2D canvas and the 3D inflate share one source.
+ * Rasterizes the smooth vector silhouette paths into a boolean grid mask
+ * (length cols*rows). The 2D editor and the 3D inflate share this single
+ * source of truth, so the puffed mesh follows the same smooth outline the
+ * user sees in the design canvas.
  */
 export function buildMask(garment: GarmentType, variant: string): boolean[] {
   const { cols, rows } = GRID[garment]
   const mask = new Array(cols * rows).fill(false)
-  const set = (c: number, r: number, v = true) => {
-    if (c < 0 || c >= cols || r < 0 || r >= rows) return
-    mask[r * cols + c] = v
-  }
-  const nx = (c: number) => c / (cols - 1) // 0..1
-  const ny = (r: number) => r / (rows - 1) // 0..1
+  const paths = silhouettePaths(garment, variant).map((d) => parsePath(d))
 
-  if (garment === 'head') {
-    const cx = 0.5
-    const cy = 0.52
-    const rx = 0.42
-    const ry = 0.46
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const dx = (nx(c) - cx) / rx
-        const dy = (ny(r) - cy) / ry
-        if (dx * dx + dy * dy <= 1) set(c, r)
-        // ears for bear/bunny
-        if (variant === 'bear') {
-          const ex = 0.22
-          for (const sx of [cx - 0.26, cx + 0.26]) {
-            const edx = (nx(c) - sx) / 0.16
-            const edy = (ny(r) - 0.16) / 0.16
-            if (edx * edx + edy * edy <= 1) set(c, r)
-          }
-          void ex
-        } else if (variant === 'bunny') {
-          for (const sx of [cx - 0.16, cx + 0.16]) {
-            const edx = (nx(c) - sx) / 0.08
-            const edy = (ny(r) - 0.12) / 0.22
-            if (edx * edx + edy * edy <= 1) set(c, r)
-          }
-        }
-      }
-    }
-    return mask
-  }
-
-  if (garment === 'shirt') {
-    const tank = variant === 'tank'
-    const hoodie = variant === 'hoodie'
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const x = nx(c)
-        const y = ny(r)
-        const inBody = x >= 0.28 && x <= 0.72 && y >= 0.18 && y <= 0.96
-        // sleeves taper out near the top
-        const sleeveTop = y >= 0.18 && y <= 0.46
-        const inSleeve =
-          !tank &&
-          sleeveTop &&
-          ((x >= 0.08 && x < 0.28) || (x > 0.72 && x <= 0.92))
-        const tankStrap = tank && x >= 0.3 && x <= 0.7 && y >= 0.12 && y < 0.18
-        if (inBody || inSleeve || tankStrap) set(c, r)
-        // neckline notch
-        if (y < 0.22 && x > 0.42 && x < 0.58) set(c, r, false)
-        // hoodie hood bump
-        if (hoodie && y >= 0.06 && y < 0.18 && x >= 0.38 && x <= 0.62) set(c, r)
-      }
-    }
-    return mask
-  }
-
-  // sweatpants
-  const short = variant === 'short'
-  const flare = variant === 'flare'
-  const legBottom = short ? 0.55 : 0.98
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const x = nx(c)
-      const y = ny(r)
-      const waist = y >= 0.04 && y < 0.2 && x >= 0.24 && x <= 0.76
-      let legs = false
-      if (y >= 0.2 && y <= legBottom) {
-        const spread = flare ? 0.06 + (y - 0.2) * 0.14 : 0.02
-        const left = x >= 0.24 - spread && x <= 0.46 + spread
-        const right = x >= 0.54 - spread && x <= 0.76 + spread
-        legs = left || right
+      const px = (c + 0.5) / cols
+      const py = (r + 0.5) / rows
+      let inside = false
+      for (const poly of paths) {
+        if (pointInPolygon(px, py, poly)) inside = !inside ? true : inside
       }
-      if (waist || legs) set(c, r)
+      mask[r * cols + c] = inside
     }
   }
   return mask
+}
+
+type Pt = { x: number; y: number }
+
+/**
+ * Flattens an SVG path `d` string (supporting M/L/Q/A/Z, absolute + relative)
+ * into a dense polygon of points for fast point-in-polygon testing.
+ */
+function parsePath(d: string): Pt[] {
+  const tokens = d.match(/[a-zA-Z]|-?\d*\.?\d+(?:e-?\d+)?/g) ?? []
+  const pts: Pt[] = []
+  let i = 0
+  let cx = 0
+  let cy = 0
+  let startX = 0
+  let startY = 0
+  let cmd = ''
+  const num = () => parseFloat(tokens[i++])
+
+  const quad = (x1: number, y1: number, x2: number, y2: number) => {
+    const steps = 16
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps
+      const mt = 1 - t
+      const x = mt * mt * cx + 2 * mt * t * x1 + t * t * x2
+      const y = mt * mt * cy + 2 * mt * t * y1 + t * t * y2
+      pts.push({ x, y })
+    }
+    cx = x2
+    cy = y2
+  }
+
+  // Arc flattened as an elliptical sweep (good enough for our circle ellipses).
+  const arc = (rx: number, ry: number, large: number, sweep: number, x2: number, y2: number) => {
+    void large
+    const steps = 24
+    // Approximate center as midpoint offset — for our usage arcs are half
+    // circles forming full ellipses, so sample along an ellipse between points.
+    const mx = (cx + x2) / 2
+    const my = (cy + y2) / 2
+    const startAng = Math.atan2(cy - my, cx - mx)
+    const dir = sweep ? 1 : -1
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps
+      const ang = startAng + dir * Math.PI * t
+      pts.push({ x: mx + Math.cos(ang) * rx, y: my + Math.sin(ang) * ry })
+    }
+    cx = x2
+    cy = y2
+  }
+
+  while (i < tokens.length) {
+    const tk = tokens[i]
+    if (/[a-zA-Z]/.test(tk)) {
+      cmd = tk
+      i++
+    }
+    switch (cmd) {
+      case 'M':
+        cx = num(); cy = num(); startX = cx; startY = cy; pts.push({ x: cx, y: cy }); cmd = 'L'; break
+      case 'm':
+        cx += num(); cy += num(); startX = cx; startY = cy; pts.push({ x: cx, y: cy }); cmd = 'l'; break
+      case 'L':
+        cx = num(); cy = num(); pts.push({ x: cx, y: cy }); break
+      case 'l':
+        cx += num(); cy += num(); pts.push({ x: cx, y: cy }); break
+      case 'H':
+        cx = num(); pts.push({ x: cx, y: cy }); break
+      case 'V':
+        cy = num(); pts.push({ x: cx, y: cy }); break
+      case 'Q': {
+        const x1 = num(); const y1 = num(); const x2 = num(); const y2 = num(); quad(x1, y1, x2, y2); break
+      }
+      case 'q': {
+        const x1 = cx + num(); const y1 = cy + num(); const x2 = cx + num(); const y2 = cy + num(); quad(x1, y1, x2, y2); break
+      }
+      case 'A': {
+        const rx = num(); const ry = num(); num(); const large = num(); const sweep = num(); const x2 = num(); const y2 = num(); arc(rx, ry, large, sweep, x2, y2); break
+      }
+      case 'a': {
+        const rx = num(); const ry = num(); num(); const large = num(); const sweep = num(); const x2 = cx + num(); const y2 = cy + num(); arc(rx, ry, large, sweep, x2, y2); break
+      }
+      case 'Z':
+      case 'z':
+        cx = startX; cy = startY; break
+      default:
+        i++
+    }
+  }
+  return pts
+}
+
+function pointInPolygon(x: number, y: number, poly: Pt[]): boolean {
+  let inside = false
+  for (let a = 0, b = poly.length - 1; a < poly.length; b = a++) {
+    const xi = poly[a].x
+    const yi = poly[a].y
+    const xj = poly[b].x
+    const yj = poly[b].y
+    const intersect =
+      yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi
+    if (intersect) inside = !inside
+  }
+  return inside
 }
 
 /**
@@ -104,12 +141,10 @@ export function edgeDistanceField(
 ): Float32Array {
   const { cols, rows } = GRID[garment]
   const field = new Float32Array(cols * rows)
-  // multi-pass chamfer-ish distance transform
   const INF = 9999
   for (let i = 0; i < field.length; i++) field[i] = mask[i] ? INF : 0
 
   const idx = (c: number, r: number) => r * cols + c
-  // forward pass
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       if (!mask[idx(c, r)]) continue
@@ -119,7 +154,6 @@ export function edgeDistanceField(
       field[idx(c, r)] = m
     }
   }
-  // backward pass
   for (let r = rows - 1; r >= 0; r--) {
     for (let c = cols - 1; c >= 0; c--) {
       if (!mask[idx(c, r)]) continue

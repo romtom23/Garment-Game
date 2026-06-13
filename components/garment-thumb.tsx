@@ -1,11 +1,10 @@
 import type { DesignLayer } from '@/lib/types'
-import { GRID } from '@/lib/garments'
-import { buildMask } from '@/lib/shapes'
+import { silhouettePaths } from '@/lib/silhouettes'
 import { DecorationShape } from '@/components/studio/decoration-shape'
 
 /**
- * Lightweight 2D SVG preview of a garment layer. Draws the garment silhouette
- * from the shared mask, then layers the vector decorations on top, clipped to
+ * Lightweight 2D SVG preview of a garment layer. Draws the smooth vector
+ * garment silhouette, then layers the vector decorations on top, clipped to
  * the silhouette so paint never spills past the fabric edge.
  */
 export function GarmentThumb({
@@ -17,23 +16,8 @@ export function GarmentThumb({
   size?: number
   className?: string
 }) {
-  const { cols, rows } = GRID[layer.garment]
-  const mask = buildMask(layer.garment, layer.variant)
+  const paths = silhouettePaths(layer.garment, layer.variant)
   const clipId = `thumb-clip-${layer.garment}-${layer.variant}`
-
-  // Build the silhouette as a set of normalized rects (one per filled cell).
-  const cells: { x: number; y: number; w: number; h: number }[] = []
-  for (let i = 0; i < cols * rows; i++) {
-    if (!mask[i]) continue
-    const c = i % cols
-    const r = Math.floor(i / cols)
-    cells.push({
-      x: c / cols,
-      y: r / rows,
-      w: 1 / cols + 0.004,
-      h: 1 / rows + 0.004,
-    })
-  }
 
   return (
     <svg
@@ -46,8 +30,8 @@ export function GarmentThumb({
     >
       <defs>
         <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
-          {cells.map((c, i) => (
-            <rect key={i} x={c.x} y={c.y} width={c.w} height={c.h} />
+          {paths.map((d, i) => (
+            <path key={i} d={d} />
           ))}
         </clipPath>
       </defs>
@@ -57,6 +41,16 @@ export function GarmentThumb({
           <DecorationShape key={d.id} d={d} />
         ))}
       </g>
+      {paths.map((d, i) => (
+        <path
+          key={`o-${i}`}
+          d={d}
+          fill="none"
+          stroke="oklch(0.45 0.03 80 / 0.4)"
+          strokeWidth={0.008}
+          strokeLinejoin="round"
+        />
+      ))}
     </svg>
   )
 }

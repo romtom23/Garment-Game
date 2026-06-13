@@ -2,8 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { Decoration, DesignLayer, ShapeKind } from '@/lib/types'
-import { GRID } from '@/lib/garments'
-import { buildMask } from '@/lib/shapes'
+import { silhouettePaths } from '@/lib/silhouettes'
 import { decorationContains, makeDecoration } from '@/lib/decorations'
 import { DecorationShape } from './decoration-shape'
 
@@ -55,9 +54,8 @@ export function VectorEditor({
   onChange,
   onToolHandled,
 }: Props) {
-  const { cols, rows } = GRID[layer.garment]
-  const mask = useMemo(
-    () => buildMask(layer.garment, layer.variant),
+  const paths = useMemo(
+    () => silhouettePaths(layer.garment, layer.variant),
     [layer.garment, layer.variant],
   )
   const clipId = `edit-clip-${layer.garment}-${layer.variant}`
@@ -66,23 +64,6 @@ export function VectorEditor({
   decosRef.current = layer.decorations
   const svgRef = useRef<SVGSVGElement>(null)
   const drag = useRef<DragMode>(null)
-
-  // Build silhouette rects (normalized) for the clip + a faint backdrop.
-  const cells = useMemo(() => {
-    const out: { x: number; y: number; w: number; h: number }[] = []
-    for (let i = 0; i < cols * rows; i++) {
-      if (!mask[i]) continue
-      const c = i % cols
-      const r = Math.floor(i / cols)
-      out.push({
-        x: c / cols,
-        y: r / rows,
-        w: 1 / cols + 0.004,
-        h: 1 / rows + 0.004,
-      })
-    }
-    return out
-  }, [cols, rows, mask])
 
   const selected = layer.decorations.find((d) => d.id === selectedId) ?? null
 
@@ -275,33 +256,38 @@ export function VectorEditor({
       >
         <defs>
           <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
-            {cells.map((c, i) => (
-              <rect key={i} x={c.x} y={c.y} width={c.w} height={c.h} />
+            {paths.map((d, i) => (
+              <path key={i} d={d} />
             ))}
           </clipPath>
         </defs>
 
-        {/* faint silhouette so the user sees the wearable area */}
-        <g opacity={0.25}>
-          {cells.map((c, i) => (
-            <rect
-              key={i}
-              x={c.x}
-              y={c.y}
-              width={c.w}
-              height={c.h}
-              fill="oklch(0.85 0.03 80)"
-            />
+        {/* soft drop shadow + faint silhouette so the wearable area reads */}
+        <g opacity={0.18}>
+          {paths.map((d, i) => (
+            <path key={i} d={d} fill="oklch(0.7 0.04 80)" />
           ))}
         </g>
 
-        {/* fabric + decorations, clipped to the garment */}
+        {/* fabric + decorations, clipped to the smooth garment outline */}
         <g clipPath={`url(#${clipId})`}>
           <rect x={0} y={0} width={1} height={1} fill={layer.baseColor} />
           {layer.decorations.map((d) => (
             <DecorationShape key={d.id} d={d} />
           ))}
         </g>
+
+        {/* crisp outline stroke around the garment */}
+        {paths.map((d, i) => (
+          <path
+            key={`o-${i}`}
+            d={d}
+            fill="none"
+            stroke="oklch(0.45 0.03 80 / 0.45)"
+            strokeWidth={0.006}
+            strokeLinejoin="round"
+          />
+        ))}
 
         {/* selection overlay (not clipped) */}
         {box && selected && (
