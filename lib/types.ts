@@ -42,6 +42,8 @@ export type Decoration = {
   points?: Vec2[]
   /** for the `image` kind — the uploaded image URL (Vercel Blob) */
   src?: string
+  /** layer opacity 0..1 (defaults to 1 / fully opaque when unset) */
+  opacity?: number
 }
 
 export type DesignLayer = {

@@ -7,6 +7,15 @@ import { pathD, starPoints, trianglePoints } from '@/lib/decorations'
  * identical everywhere.
  */
 export function DecorationShape({ d }: { d: Decoration }) {
+  const opacity = d.opacity ?? 1
+  return (
+    <g opacity={opacity === 1 ? undefined : opacity}>
+      <DecorationShapeBody d={d} />
+    </g>
+  )
+}
+
+function DecorationShapeBody({ d }: { d: Decoration }) {
   const common = {
     fill: d.fill,
     stroke: d.stroke,

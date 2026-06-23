@@ -212,6 +212,26 @@ export function StudioToolbar({
               aria-label="Outline width"
             />
           </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-muted-foreground">
+              Opacity
+            </span>
+            <input
+              type="range"
+              min={0.1}
+              max={1}
+              step={0.05}
+              value={selected.opacity ?? 1}
+              onChange={(e) =>
+                onUpdateSelected({ opacity: Number(e.target.value) })
+              }
+              className="flex-1 accent-primary"
+              aria-label="Opacity"
+            />
+            <span className="w-9 text-right text-xs font-semibold text-muted-foreground tabular-nums">
+              {Math.round((selected.opacity ?? 1) * 100)}%
+            </span>
+          </div>
           <div className="flex flex-wrap gap-2">
             <Button
               variant="secondary"
